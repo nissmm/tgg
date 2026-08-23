@@ -15,6 +15,7 @@ def main_menu_keyboard(is_admin: bool, is_hr: bool) -> InlineKeyboardMarkup:
 def admin_panel_keyboard() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="📌 Выбрать топик для уведомлений", callback_data="admin_select_topic")
+    b.button(text="👤 Пользователи", callback_data="admin_list_users")
     b.button(text="➕ Назначить роль HR", callback_data="admin_assign_hr")
     b.button(text="➖ Снять роль HR", callback_data="admin_remove_hr")
     b.button(text="👥 Список HR", callback_data="admin_list_hr")

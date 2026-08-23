@@ -15,8 +15,8 @@ router = Router()
 router.message.filter(IsHR())
 router.callback_query.filter(IsHR())
 
-PHONE_RE = re.compile(r"^\+?\d{10,15}$")
-USERNAME_RE = re.compile(r"^@?[A-Za-z0-9_]{5,32}$")
+PHONE_RE = re.compile(r"^\+\d{10,15}$")
+USERNAME_RE = re.compile(r"^@[A-Za-z0-9_]{5,32}$")
 DATE_RE = re.compile(r"^\d{2}\.\d{2}\.\d{4}$")
 
 

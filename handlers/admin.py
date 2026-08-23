@@ -1,8 +1,10 @@
+import html
 from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.types.input_rich_message import InputRichMessage
 
 import storage
 from filters import IsChannelAdmin
@@ -29,9 +31,25 @@ def _format_users_list(users: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_users_plain(users: dict) -> str:
+    if not users:
+        return "Пока никто не писал боту /start."
+    lines = ["Пользователи, которые запускали бота:"]
+    for uid, info in users.items():
+        lines.append(f"{info['username']} - {uid}")
+    return "\n".join(lines)
+
+
 @router.callback_query(F.data == "admin_panel")
 async def show_admin_panel(callback: CallbackQuery):
     await callback.message.edit_text("⚙️ Админ-панель", reply_markup=admin_panel_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_list_users")
+async def list_users(callback: CallbackQuery):
+    text = _format_users_plain(storage.get_users())
+    await callback.message.edit_text(text, reply_markup=admin_panel_keyboard())
     await callback.answer()
 
 
@@ -71,7 +89,7 @@ async def set_topic(callback: CallbackQuery):
 async def assign_hr_start(callback: CallbackQuery, state: FSMContext):
     users = storage.get_users()
     text = _format_users_list(users) + "\n\nОтправьте tg id пользователя, которому нужно выдать роль HR."
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=cancel_keyboard())
+    await callback.message.edit_text(text, reply_markup=cancel_keyboard())
     await state.set_state(AssignRole.waiting_for_id)
     await callback.answer()
 
@@ -170,22 +188,42 @@ async def hr_table_menu(callback: CallbackQuery):
     await callback.answer()
 
 
+def _build_hr_table_html(records: list) -> str:
+    headers = ("Кто записал", "Кого и сколько лет", "Телефон", "Юз", "Дата собеса")
+    header_row = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+
+    body_rows = []
+    for r in records:
+        cells = (
+            r["recorded_by"],
+            r["candidate_info"],
+            r["phone"],
+            r["username"],
+            r["interview_date"],
+        )
+        body_rows.append(
+            "<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in cells) + "</tr>"
+        )
+
+    return "<table bordered striped>" + header_row + "".join(body_rows) + "</table>"
+
+
 @router.callback_query(F.data.startswith("hrtable_filter:"))
 async def hr_table_show(callback: CallbackQuery):
     period = callback.data.split(":", 1)[1]
     records = _filter_records(storage.get_hr_records(), period)
+    keyboard = hr_table_filters_keyboard()
+
     if not records:
-        await callback.message.edit_text("Записей за выбранный период нет.", reply_markup=hr_table_filters_keyboard())
+        await callback.message.edit_text("Записей за выбранный период нет.", reply_markup=keyboard)
         await callback.answer()
         return
 
-    header = f"{'#':<4}{'Кто записал':<14}{'Кандидат':<18}{'Телефон':<14}{'Юз':<14}{'Собес':<11}"
-    lines = [header, "-" * len(header)]
-    for r in records:
-        lines.append(
-            f"{str(r['id']):<4}{r['recorded_by'][:13]:<14}{r['candidate_info'][:17]:<18}"
-            f"{r['phone'][:13]:<14}{r['username'][:13]:<14}{r['interview_date'][:10]:<11}"
-        )
-    text = "<pre>" + "\n".join(lines) + "</pre>"
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=hr_table_filters_keyboard())
+    rich_message = InputRichMessage(html=_build_hr_table_html(records))
+    await callback.bot.edit_message_text(
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        rich_message=rich_message,
+        reply_markup=keyboard,
+    )
     await callback.answer()
