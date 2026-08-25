@@ -78,7 +78,14 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
         return
 
     if action == "postpone":
-        storage.update_record(record_id, status="postponed")
+        storage.update_record(
+            record_id,
+            status="postponed",
+            handled_by_id=reviewer.id,
+            handled_by_username=reviewer_username,
+            handled_at=datetime.now().isoformat(),
+        )
+        storage.log_record_action(record_id, "postponed", reviewer.id, reviewer_username, "Заявка отложена")
         record = storage.get_record(record_id)
         tickets = storage.get_ticket_messages(record_id)
         await callback.answer("Заявка отложена ⏳")
@@ -87,6 +94,20 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
             parse_mode="HTML",
             reply_markup=moderation_keyboard(record_id, len(tickets)),
         )
+
+        settings = storage.get_settings()
+        topic_id = settings.get("target_topic_id")
+        try:
+            await bot.send_message(
+                TELEGRAM_CHANNEL_ID,
+                f"⏳ <b>Заявка #{record_id} отложена на рассмотрение</b>\n"
+                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
+                f"Обработал: {html.escape(reviewer_username)}",
+                message_thread_id=topic_id,
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
         return
 
     if action == "approve":
@@ -99,8 +120,12 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
             status="approved",
             hr_id=reviewer.id,
             hr_username=reviewer_username,
+            handled_by_id=reviewer.id,
+            handled_by_username=reviewer_username,
+            handled_at=datetime.now().isoformat(),
             approved_at=datetime.now().isoformat(),
         )
+        storage.log_record_action(record_id, "approved", reviewer.id, reviewer_username, "Заявка одобрена")
         await callback.answer("Заявка одобрена ✅")
 
         requester_id = record.get("requester_id")
@@ -116,18 +141,30 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
             except Exception:
                 pass
 
-        new_text = "\n".join(
-            [
-                f"✅ <b>Заявка #{record_id} одобрена</b>",
-                "",
-                f"Кандидат: {html.escape(str(record['candidate_info']))}",
-                f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
-                f"Юз: {html.escape(str(record.get('username') or '—'))}",
-                f"Время собеса: {html.escape(str(record['interview_datetime']))}",
-                f"Одобрил: {html.escape(reviewer_username)}",
-            ]
+        updated_record = storage.get_record(record_id)
+        tickets = storage.get_ticket_messages(record_id)
+        await callback.message.edit_text(
+            format_moderation_card(updated_record),
+            parse_mode="HTML",
+            reply_markup=moderation_keyboard(record_id, len(tickets)),
         )
-        await callback.message.edit_text(new_text, parse_mode="HTML")
+
+        settings = storage.get_settings()
+        topic_id = settings.get("target_topic_id")
+        try:
+            await bot.send_message(
+                TELEGRAM_CHANNEL_ID,
+                f"✅ <b>Заявка #{record_id} одобрена</b>\n"
+                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
+                f"Телефон: <code>{html.escape(str(record['phone']))}</code>\n"
+                f"Юз: {html.escape(str(record.get('username') or '—'))}\n"
+                f"Время собеса: {html.escape(str(record['interview_datetime']))}\n"
+                f"Одобрил(а): {html.escape(reviewer_username)}",
+                message_thread_id=topic_id,
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
         return
 
     if action == "reject":
@@ -140,8 +177,12 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
             status="rejected",
             hr_id=reviewer.id,
             hr_username=reviewer_username,
+            handled_by_id=reviewer.id,
+            handled_by_username=reviewer_username,
+            handled_at=datetime.now().isoformat(),
             rejected_at=datetime.now().isoformat(),
         )
+        storage.log_record_action(record_id, "rejected", reviewer.id, reviewer_username, "Заявка отклонена")
         await callback.answer("Заявка отклонена ❌")
 
         requester_id = record.get("requester_id")
@@ -156,15 +197,27 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
             except Exception:
                 pass
 
-        new_text = "\n".join(
-            [
-                f"❌ <b>Заявка #{record_id} отклонена</b>",
-                "",
-                f"Кандидат: {html.escape(str(record['candidate_info']))}",
-                f"Отклонил: {html.escape(reviewer_username)}",
-            ]
+        updated_record = storage.get_record(record_id)
+        tickets = storage.get_ticket_messages(record_id)
+        await callback.message.edit_text(
+            format_moderation_card(updated_record),
+            parse_mode="HTML",
+            reply_markup=moderation_keyboard(record_id, len(tickets)),
         )
-        await callback.message.edit_text(new_text, parse_mode="HTML")
+
+        settings = storage.get_settings()
+        topic_id = settings.get("target_topic_id")
+        try:
+            await bot.send_message(
+                TELEGRAM_CHANNEL_ID,
+                f"❌ <b>Заявка #{record_id} отклонена</b>\n"
+                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
+                f"Отклонил(а): {html.escape(reviewer_username)}",
+                message_thread_id=topic_id,
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
         return
 
 
@@ -222,6 +275,29 @@ async def mod_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
         reply_markup=ticket_dialog_keyboard(record_id),
     )
 
+    # Информационное уведомление в канал БЕЗ кнопок
+    settings = storage.get_settings()
+    topic_id = settings.get("target_topic_id")
+    notify_text = "\n".join(
+        [
+            f"💬 <b>Ответ HR в тикете по заявке #{record_id}</b>",
+            "",
+            f"HR: {html.escape(sender_name)}",
+            f"Кандидат: {html.escape(str(record['candidate_info']))}",
+            "",
+            f"<b>Сообщение:</b>\n{html.escape(text)}",
+        ]
+    )
+    try:
+        await bot.send_message(
+            TELEGRAM_CHANNEL_ID,
+            notify_text,
+            message_thread_id=topic_id,
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
 
 # ------------------------------------------------------------- ответ кандидата
 @router.callback_query(F.data.startswith("user_reply_ticket:"))
@@ -273,17 +349,19 @@ async def user_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
 
     await message.answer("✅ Ваш ответ передан HR. Ожидайте сообщения.")
 
-    # Уведомляем в канал/топик
+    # Информационное уведомление в канал/топик БЕЗ кнопок
     settings = storage.get_settings()
     topic_id = settings.get("target_topic_id")
     notify_text = "\n".join(
         [
-            f"💬 <b>Новый ответ в тикете по заявке #{record_id}</b>",
+            f"💬 <b>Новый ответ кандидата в тикете #{record_id}</b>",
             "",
             f"От: {html.escape(sender_name)} (<code>{message.from_user.id}</code>)",
             f"Кандидат: {html.escape(str(record['candidate_info']))}",
             "",
             f"<b>Сообщение:</b>\n{html.escape(text)}",
+            "",
+            "ℹ️ <i>Для ответа перейдите в личные сообщения с ботом.</i>",
         ]
     )
     try:
@@ -292,7 +370,6 @@ async def user_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
             notify_text,
             message_thread_id=topic_id,
             parse_mode="HTML",
-            reply_markup=ticket_dialog_keyboard(record_id),
         )
     except Exception:
         pass

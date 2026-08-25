@@ -148,6 +148,16 @@ def add_hr_record(record: dict) -> dict:
     record["id"] = max((r.get("id", 0) for r in records), default=0) + 1
     record.setdefault("created_at", datetime.now().isoformat())
     record.setdefault("status", "approved")
+    record.setdefault("tickets", [])
+    record.setdefault("logs", [
+        {
+            "action": "created",
+            "actor_id": record.get("hr_id") or record.get("requester_id"),
+            "actor_name": record.get("hr_username") or record.get("requester_username") or "—",
+            "note": "Запись создана",
+            "timestamp": record["created_at"],
+        }
+    ])
     records.append(record)
     _save_records(records)
     return record
@@ -160,6 +170,22 @@ def get_record(record_id: int) -> Optional[dict]:
     return None
 
 
+def log_record_action(record_id: int, action: str, actor_id: Optional[int], actor_name: str, note: str = "") -> None:
+    records = get_hr_records()
+    for r in records:
+        if r["id"] == record_id:
+            logs = r.setdefault("logs", [])
+            logs.append({
+                "action": action,
+                "actor_id": actor_id,
+                "actor_name": actor_name,
+                "note": note,
+                "timestamp": datetime.now().isoformat(),
+            })
+            _save_records(records)
+            return
+
+
 def update_record(record_id: int, **fields) -> Optional[dict]:
     records = get_hr_records()
     for r in records:
@@ -170,8 +196,16 @@ def update_record(record_id: int, **fields) -> Optional[dict]:
     return None
 
 
+def get_self_apply_records() -> list:
+    """Возвращает все заявки, созданные через самозапись."""
+    return [
+        r for r in get_hr_records()
+        if r.get("is_self_apply") or r.get("requester_id") is not None or r.get("hr_username") == "Самозапись"
+    ]
+
+
 def get_pending_records() -> list:
-    return [r for r in get_hr_records() if r.get("status") in ("pending", "postponed")]
+    return [r for r in get_self_apply_records() if r.get("status") in ("pending", "postponed")]
 
 
 def get_records_by_hr(hr_id: int, status: Optional[str] = "approved") -> list:
@@ -194,6 +228,14 @@ def add_ticket_message(record_id: int, sender_type: str, sender_id: int, author_
                 "created_at": datetime.now().isoformat(),
             }
             messages.append(msg)
+            logs = r.setdefault("logs", [])
+            logs.append({
+                "action": "ticket_reply",
+                "actor_id": sender_id,
+                "actor_name": author_name,
+                "note": f"Сообщение ({sender_type}): {text[:60]}",
+                "timestamp": datetime.now().isoformat(),
+            })
             _save_records(records)
             return msg
     return None

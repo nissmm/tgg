@@ -15,15 +15,16 @@ def main_menu_keyboard(is_admin: bool, is_hr: bool) -> InlineKeyboardMarkup:
 
 def admin_panel_keyboard() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    b.button(text="📊 Таблица записей HR", callback_data="admin_hr_table")
+    b.button(text="📥 Таблица самозаписей", callback_data="admin_self_apply_table")
+    b.button(text="🛎️ Заявки на модерации", callback_data="admin_pending_list:0")
+    b.button(text="✏️ Все записи HR", callback_data="admin_all_records:0")
+    b.button(text="🎯 План на день", callback_data="admin_set_plan")
     b.button(text="📌 Выбрать топик для уведомлений", callback_data="admin_select_topic")
-    b.button(text="👤 Пользователи", callback_data="admin_list_users")
+    b.button(text="👥 Список HR", callback_data="admin_list_hr")
     b.button(text="➕ Назначить роль HR", callback_data="admin_assign_hr")
     b.button(text="➖ Снять роль HR", callback_data="admin_remove_hr")
-    b.button(text="👥 Список HR", callback_data="admin_list_hr")
-    b.button(text="📊 Таблица записей HR", callback_data="admin_hr_table")
-    b.button(text="✏️ Все записи", callback_data="admin_all_records:0")
-    b.button(text="🛎️ Заявки на модерации", callback_data="admin_pending_list:0")
-    b.button(text="🎯 План на день", callback_data="admin_set_plan")
+    b.button(text="👤 Пользователи", callback_data="admin_list_users")
     b.button(text="⬅️ Назад", callback_data="back_main")
     b.adjust(1)
     return b.as_markup()
@@ -32,6 +33,7 @@ def admin_panel_keyboard() -> InlineKeyboardMarkup:
 def hr_panel_keyboard(shift_active: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="➕ Записать нового кандидата", callback_data="hr_new_record")
+    b.button(text="🛎️ Заявки на модерацию", callback_data="hr_pending_list:0")
     b.button(text="✏️ Мои записи", callback_data="hr_my_records:0")
     b.button(text="👤 Мой профиль", callback_data="hr_profile")
     if shift_active:
@@ -65,6 +67,17 @@ def hr_table_filters_keyboard() -> InlineKeyboardMarkup:
     b.button(text="За сегодня", callback_data="hrtable_filter:today")
     b.button(text="За неделю", callback_data="hrtable_filter:week")
     b.button(text="За месяц", callback_data="hrtable_filter:month")
+    b.button(text="⬅️ Назад", callback_data="admin_panel")
+    b.adjust(2, 2, 1)
+    return b.as_markup()
+
+
+def self_apply_table_filters_keyboard() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="Все самозаписи", callback_data="satab_filter:all")
+    b.button(text="За сегодня", callback_data="satab_filter:today")
+    b.button(text="За неделю", callback_data="satab_filter:week")
+    b.button(text="За месяц", callback_data="satab_filter:month")
     b.button(text="⬅️ Назад", callback_data="admin_panel")
     b.adjust(2, 2, 1)
     return b.as_markup()

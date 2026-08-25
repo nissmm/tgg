@@ -123,6 +123,7 @@ def format_hr_profile(user_id: int, profile: dict, records: list, plan: int, shi
 
 
 def format_channel_notification(record: dict) -> str:
+    """Уведомление в топик о записи от HR (чистый текст, без кнопок)."""
     return "\n".join(
         [
             "🆕 <b>Новая запись HR</b>",
@@ -134,6 +135,28 @@ def format_channel_notification(record: dict) -> str:
             f"Время собеса: {html.escape(str(record.get('interview_datetime', '—')))}",
         ]
     )
+
+
+def format_channel_self_apply_notification(record: dict) -> str:
+    """Уведомление в топик о новой самозаписи (чистый текст, без кнопок)."""
+    return "\n".join(
+        [
+            f"🆕 <b>Заявка на модерацию (самозапись) #{record['id']}</b>",
+            "",
+            f"От: {html.escape(str(record.get('requester_username') or '—'))} (<code>{record.get('requester_id') or '—'}</code>)",
+            f"Кандидат: {html.escape(str(record['candidate_info']))}",
+            f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
+            f"Юз: {html.escape(str(record.get('username') or '—'))}",
+            f"Желаемое время собеса: {html.escape(str(record.get('interview_datetime', '—')))}",
+            "",
+            "ℹ️ <i>Рассмотрение заявок и общение — в личных сообщениях с ботом.</i>",
+        ]
+    )
+
+
+def format_channel_event_notification(title: str, text: str) -> str:
+    """Информационное уведомление о событии в чат/топик (чистый текст, без кнопок)."""
+    return f"{title}\n\n{text}"
 
 
 def format_moderation_card(record: dict) -> str:
@@ -152,22 +175,38 @@ def format_moderation_card(record: dict) -> str:
         f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
         f"Юз: {html.escape(str(record.get('username') or '—'))}",
         f"Желаемое время собеса: {html.escape(str(record.get('interview_datetime', '—')))}",
+        f"Создана: {format_dt(record.get('created_at'))}",
     ]
+
+    # Логи действий HR
+    if record.get("handled_by_username"):
+        handled_act = "Одобрил(а)" if record.get("status") == "approved" else "Отклонил(а)" if record.get("status") == "rejected" else "Обработал(а)"
+        lines.append(f"\n👤 <b>{handled_act}:</b> {html.escape(str(record['handled_by_username']))} ({format_dt(record.get('handled_at'))})")
 
     tickets = record.get("tickets", [])
     if tickets:
-        lines.append(f"\n💬 <i>Сообщений в тикете: {len(tickets)}</i>")
+        hr_repliers = {m.get("author_name") for m in tickets if m.get("sender_type") == "hr"}
+        repliers_str = ", ".join(hr_repliers) if hr_repliers else "—"
+        lines.append(f"💬 <b>Сообщений в тикете:</b> {len(tickets)} (отвечали: {html.escape(repliers_str)})")
 
     return "\n".join(lines)
 
 
 def format_ticket_history(record: dict) -> str:
     tickets = record.get("tickets", [])
+    status_label = {
+        "pending": "🆕 На модерации",
+        "postponed": "⏳ Отложена",
+        "approved": "✅ Одобрена",
+        "rejected": "❌ Отклонена",
+    }.get(record.get("status", "pending"), record.get("status"))
+
     header = (
-        f"📜 <b>История тикета по заявке #{record['id']}</b>\n"
+        f"📜 <b>История тикета по заявке #{record['id']}</b> ({status_label})\n"
         f"👤 Кандидат: <b>{html.escape(str(record['candidate_info']))}</b>\n"
         f"📞 Телефон: <code>{html.escape(str(record['phone']))}</code>\n"
         f"💬 Юз: {html.escape(str(record.get('username') or '—'))}\n"
+        f"🕒 Время собеса: {html.escape(str(record.get('interview_datetime', '—')))}\n"
         "────────────────────\n"
     )
 
@@ -183,6 +222,42 @@ def format_ticket_history(record: dict) -> str:
         body_lines.append(f"[{created}] {icon} <b>{author}</b>:\n{text}\n")
 
     return header + "\n".join(body_lines)
+
+
+def build_self_apply_table_html(records: list) -> str:
+    """HTML-таблица для самозаписей с полным логированием действий HR."""
+    headers = ("ID", "Кандидат", "Телефон", "Юз", "Собес", "Статус", "Кто обработал", "Отвечали в тикете")
+    header_row = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+
+    status_map = {
+        "pending": "🆕 На модерации",
+        "postponed": "⏳ Отложена",
+        "approved": "✅ Одобрена",
+        "rejected": "❌ Отклонена",
+    }
+
+    body_rows = []
+    for r in records:
+        tickets = r.get("tickets", [])
+        hr_repliers = {m.get("author_name") for m in tickets if m.get("sender_type") == "hr"}
+        repliers_str = f"{', '.join(hr_repliers)} ({len(tickets)})" if hr_repliers else ("Есть сообщ." if tickets else "—")
+
+        handled_str = r.get("handled_by_username") or (r.get("hr_username") if r.get("hr_username") != "Самозапись" else "—") or "—"
+        status_text = status_map.get(r.get("status", "pending"), r.get("status", "pending"))
+
+        cells = (
+            f"#{r['id']}",
+            r["candidate_info"],
+            r["phone"],
+            r.get("username") or "—",
+            r.get("interview_datetime", "—"),
+            status_text,
+            handled_str,
+            repliers_str,
+        )
+        body_rows.append("<tr>" + "".join(f"<td>{html.escape(str(c))}</td>" for c in cells) + "</tr>")
+
+    return "<table bordered striped>" + header_row + "".join(body_rows) + "</table>"
 
 
 def format_record_card(record: dict) -> str:

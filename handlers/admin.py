@@ -8,13 +8,14 @@ from aiogram.types.input_rich_message import InputRichMessage
 
 import storage
 from filters import IsChannelAdmin
-from formatting import format_moderation_card
+from formatting import build_self_apply_table_html, format_moderation_card
 from keyboards import (
     admin_panel_keyboard,
     cancel_keyboard,
     hr_table_filters_keyboard,
     moderation_keyboard,
     records_list_keyboard,
+    self_apply_table_filters_keyboard,
     topics_keyboard,
 )
 from states import AssignRole, RemoveRole, SetPlan
@@ -218,7 +219,7 @@ def _build_hr_table_html(records: list) -> str:
 async def hr_table_show(callback: CallbackQuery):
     await callback.answer()
     period = callback.data.split(":", 1)[1]
-    records = _filter_records([r for r in storage.get_hr_records() if r.get("status", "approved") == "approved"], period)
+    records = _filter_records([r for r in storage.get_hr_records() if r.get("status", "approved") == "approved" and r.get("hr_username") != "Самозапись"], period)
     keyboard = hr_table_filters_keyboard()
 
     if not records:
@@ -226,6 +227,38 @@ async def hr_table_show(callback: CallbackQuery):
         return
 
     rich_message = InputRichMessage(html=_build_hr_table_html(records))
+    await callback.bot.edit_message_text(
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+        rich_message=rich_message,
+        reply_markup=keyboard,
+    )
+
+
+# -------------------------------------------------------- таблица самозаписи
+@router.callback_query(F.data == "admin_self_apply_table")
+async def self_apply_table_menu(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "📥 <b>Таблица самозаписей и действий HR</b>\n\nВыберите период для отображения:",
+        parse_mode="HTML",
+        reply_markup=self_apply_table_filters_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("satab_filter:"))
+async def self_apply_table_show(callback: CallbackQuery):
+    await callback.answer()
+    period = callback.data.split(":", 1)[1]
+    self_records = storage.get_self_apply_records()
+    records = _filter_records(self_records, period)
+    keyboard = self_apply_table_filters_keyboard()
+
+    if not records:
+        await callback.message.edit_text("Самозаписей за выбранный период нет.", reply_markup=keyboard)
+        return
+
+    rich_message = InputRichMessage(html=build_self_apply_table_html(records))
     await callback.bot.edit_message_text(
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,

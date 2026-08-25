@@ -8,8 +8,20 @@ from aiogram.types import CallbackQuery, Message
 import storage
 from config import TELEGRAM_CHANNEL_ID
 from filters import IsHR
-from formatting import format_channel_notification, format_dt, format_duration, progress_bar
-from keyboards import cancel_keyboard, hr_panel_keyboard
+from formatting import (
+    format_channel_notification,
+    format_duration,
+    format_hr_profile,
+    format_moderation_card,
+    progress_bar,
+)
+from keyboards import (
+    cancel_keyboard,
+    hr_panel_keyboard,
+    moderation_keyboard,
+    records_list_keyboard,
+    skip_or_cancel_keyboard,
+)
 from states import NewHRRecord
 
 router = Router()
@@ -66,10 +78,21 @@ async def step_phone(message: Message, state: FSMContext):
         return
     await state.update_data(phone=text)
     await message.answer(
-        'Юзернейм кандидата в Telegram? (например: @username; если юзернейма нет — отправьте "-")',
-        reply_markup=cancel_keyboard(),
+        'Юзернейм кандидата в Telegram? (например: @username; если юзернейма нет — нажмите «Пропустить пункт» или отправьте "-")',
+        reply_markup=skip_or_cancel_keyboard("hr_skip_username"),
     )
     await state.set_state(NewHRRecord.username)
+
+
+@router.callback_query(F.data == "hr_skip_username", NewHRRecord.username)
+async def step_skip_username(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.update_data(username=None)
+    await callback.message.edit_text(
+        "Дата и время собеседования? (примерно, в формате ДД.ММ.ГГГГ ЧЧ:ММ, например 25.05.2026 14:00)",
+        reply_markup=cancel_keyboard(),
+    )
+    await state.set_state(NewHRRecord.interview_datetime)
 
 
 @router.message(NewHRRecord.username)
@@ -77,8 +100,8 @@ async def step_username(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     if not USERNAME_RE.match(text):
         await message.answer(
-            'Введите юзернейм в формате @username, либо "-", если его нет.',
-            reply_markup=cancel_keyboard(),
+            'Введите юзернейм в формате @username, нажмите кнопку «Пропустить пункт», либо отправьте "-".',
+            reply_markup=skip_or_cancel_keyboard("hr_skip_username"),
         )
         return
     await state.update_data(username=None if text == "-" else text)
@@ -147,33 +170,45 @@ async def hr_profile(callback: CallbackQuery):
     user_id = callback.from_user.id
     profile = storage.get_hr_profile(user_id) or {}
     records = storage.get_records_by_hr(user_id, status="approved")
-
-    total_count = len(records)
-    last_record_at = max((r["created_at"] for r in records), default=None)
-
-    today = datetime.now().date()
-    records_today = [r for r in records if datetime.fromisoformat(r["created_at"]).date() == today]
     plan = storage.get_daily_plan()
-
-    worked_seconds = profile.get("total_worked_seconds", 0.0)
     shift_active = storage.is_shift_active(user_id)
-    if shift_active and profile.get("shift_start"):
-        worked_seconds += (datetime.now() - datetime.fromisoformat(profile["shift_start"])).total_seconds()
 
-    text = "\n".join(
-        [
-            "👤 Мой профиль",
-            "",
-            f"Записал всего: {total_count}",
-            f"Последняя запись: {format_dt(last_record_at)}",
-            f"Дата присоединения: {format_dt(profile.get('joined_at'))}",
-            f"Смена: {'идёт' if shift_active else 'не начата'}",
-            f"Отработано времени: {format_duration(worked_seconds)}",
-            f"План на сегодня: {progress_bar(len(records_today), plan)}",
-            "🏅 Ранг: скоро",
-        ]
+    text = format_hr_profile(user_id, profile, records, plan, shift_active)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=hr_panel_keyboard(shift_active))
+
+
+# ------------------------------------------------ заявки на модерации для HR
+@router.callback_query(F.data.startswith("hr_pending_list:"))
+async def hr_pending_list(callback: CallbackQuery):
+    await callback.answer()
+    page = int(callback.data.split(":")[1])
+    pending = sorted(storage.get_pending_records(), key=lambda r: r["created_at"])
+    shift_active = storage.is_shift_active(callback.from_user.id)
+    if not pending:
+        await callback.message.edit_text("Заявок на модерации нет.", reply_markup=hr_panel_keyboard(shift_active))
+        return
+    await callback.message.edit_text(
+        f"Заявки на модерации ({len(pending)}):",
+        reply_markup=records_list_keyboard(pending, page, "hr_pending_list", "hr_pending_view", "hr_panel"),
     )
-    await callback.message.edit_text(text, reply_markup=hr_panel_keyboard(shift_active))
+
+
+@router.callback_query(F.data.startswith("hr_pending_view:"))
+async def hr_pending_view(callback: CallbackQuery):
+    await callback.answer()
+    _, raw_id, raw_page = callback.data.split(":")
+    record = storage.get_record(int(raw_id))
+    shift_active = storage.is_shift_active(callback.from_user.id)
+    if not record or record.get("status") not in ("pending", "postponed"):
+        await callback.message.edit_text("Заявка не найдена или уже обработана.", reply_markup=hr_panel_keyboard(shift_active))
+        return
+    tickets = storage.get_ticket_messages(record["id"])
+    text = format_moderation_card(record)
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=moderation_keyboard(record["id"], len(tickets)),
+    )
 
 
 # --------------------------------------------------------------- смена ----

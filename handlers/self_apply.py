@@ -133,14 +133,13 @@ async def sa_interview_datetime(message: Message, state: FSMContext):
 
     settings = storage.get_settings()
     topic_id = settings.get("target_topic_id")
-    card = format_moderation_card(record)
+    notification = format_channel_self_apply_notification(record)
     try:
         sent = await message.bot.send_message(
             TELEGRAM_CHANNEL_ID,
-            card,
+            notification,
             message_thread_id=topic_id,
             parse_mode="HTML",
-            reply_markup=moderation_keyboard(record["id"]),
         )
         storage.update_record(record["id"], channel_chat_id=sent.chat.id, channel_message_id=sent.message_id)
     except Exception:

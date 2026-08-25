@@ -50,9 +50,12 @@ class IsChannelAdmin(BaseFilter):
 
 
 class IsHR(BaseFilter):
-    """True, если пользователю выдана роль HR внутри бота."""
+    """True, если пользователю выдана роль HR внутри бота или он является админом канала."""
 
-    async def __call__(self, event: Message | CallbackQuery) -> bool:
+    async def __call__(self, event: Message | CallbackQuery, bot: Bot) -> bool:
         if not event.from_user:
             return False
-        return storage.is_hr(event.from_user.id)
+        user_id = event.from_user.id
+        if storage.is_hr(user_id):
+            return True
+        return await IsChannelAdmin()(event, bot)
