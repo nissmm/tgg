@@ -25,6 +25,8 @@ class IsChannelAdmin(BaseFilter):
     """True, если пользователь является админом/создателем целевого канала/группы."""
 
     async def __call__(self, event: Message | CallbackQuery, bot: Bot) -> bool:
+        if not event.from_user:
+            return False
         user_id = event.from_user.id
         now = time.monotonic()
 
@@ -51,4 +53,6 @@ class IsHR(BaseFilter):
     """True, если пользователю выдана роль HR внутри бота."""
 
     async def __call__(self, event: Message | CallbackQuery) -> bool:
+        if not event.from_user:
+            return False
         return storage.is_hr(event.from_user.id)

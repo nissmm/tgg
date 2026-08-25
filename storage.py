@@ -25,7 +25,7 @@ def _load(path: Path, default):
     try:
         with open(path, "rb") as f:
             return pickle.load(f)
-    except EOFError:
+    except Exception:
         return default
 
 
@@ -145,7 +145,7 @@ def _save_records(records: list) -> None:
 def add_hr_record(record: dict) -> dict:
     records = get_hr_records()
     record = dict(record)
-    record["id"] = (records[-1]["id"] + 1) if records else 1
+    record["id"] = max((r.get("id", 0) for r in records), default=0) + 1
     record.setdefault("created_at", datetime.now().isoformat())
     record.setdefault("status", "approved")
     records.append(record)
@@ -171,11 +171,37 @@ def update_record(record_id: int, **fields) -> Optional[dict]:
 
 
 def get_pending_records() -> list:
-    return [r for r in get_hr_records() if r.get("status") == "pending"]
+    return [r for r in get_hr_records() if r.get("status") in ("pending", "postponed")]
 
 
-def get_records_by_hr(hr_id: int, status: str = "approved") -> list:
+def get_records_by_hr(hr_id: int, status: Optional[str] = "approved") -> list:
+    if status is None:
+        return [r for r in get_hr_records() if r.get("hr_id") == hr_id]
     return [r for r in get_hr_records() if r.get("hr_id") == hr_id and r.get("status") == status]
+
+
+def add_ticket_message(record_id: int, sender_type: str, sender_id: int, author_name: str, text: str) -> Optional[dict]:
+    records = get_hr_records()
+    for r in records:
+        if r["id"] == record_id:
+            messages = r.setdefault("tickets", [])
+            msg = {
+                "id": len(messages) + 1,
+                "sender_type": sender_type,  # 'hr' | 'user'
+                "sender_id": sender_id,
+                "author_name": author_name,
+                "text": text,
+                "created_at": datetime.now().isoformat(),
+            }
+            messages.append(msg)
+            _save_records(records)
+            return msg
+    return None
+
+
+def get_ticket_messages(record_id: int) -> list:
+    record = get_record(record_id)
+    return record.get("tickets", []) if record else []
 
 
 # -------------------------------------------------------------- settings --

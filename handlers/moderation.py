@@ -1,10 +1,21 @@
+import html
 from datetime import datetime
 
-from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram import Bot, F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
 import storage
+from config import TELEGRAM_CHANNEL_ID
 from filters import IsChannelAdmin
+from formatting import format_moderation_card, format_ticket_history
+from keyboards import (
+    cancel_keyboard,
+    moderation_keyboard,
+    ticket_dialog_keyboard,
+    user_ticket_keyboard,
+)
+from states import ModeratorReplyTicket, UserReplyTicket
 
 router = Router()
 
@@ -16,25 +27,73 @@ async def _can_moderate(callback: CallbackQuery) -> bool:
 
 
 @router.callback_query(F.data.startswith("modrec:"))
-async def moderate_record(callback: CallbackQuery):
+async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    parts = callback.data.split(":")
+    action = parts[1]
+    record_id = int(parts[2])
+    record = storage.get_record(record_id)
+    if not record:
+        await callback.answer("Заявка не найдена.", show_alert=True)
+        return
+
     if not await _can_moderate(callback):
         await callback.answer("У вас нет прав модерировать заявки.", show_alert=True)
         return
 
-    _, action, raw_id = callback.data.split(":")
-    record_id = int(raw_id)
-    record = storage.get_record(record_id)
-    if not record:
-        await callback.answer("Заявка не найдена (возможно, уже обработана).", show_alert=True)
-        return
-    if record.get("status") != "pending":
-        await callback.answer("Эта заявка уже обработана.", show_alert=True)
+    reviewer = callback.from_user
+    reviewer_username = f"@{reviewer.username}" if reviewer.username else f"ID {reviewer.id}"
+
+    if action == "view":
+        await callback.answer()
+        tickets = storage.get_ticket_messages(record_id)
+        card_text = format_moderation_card(record)
+        await callback.message.edit_text(
+            card_text,
+            parse_mode="HTML",
+            reply_markup=moderation_keyboard(record_id, len(tickets)),
+        )
         return
 
-    reviewer = callback.from_user
-    reviewer_username = f"@{reviewer.username}" if reviewer.username else "(без username)"
+    if action == "ticket":
+        await callback.answer()
+        history_text = format_ticket_history(record)
+        await callback.message.edit_text(
+            history_text,
+            parse_mode="HTML",
+            reply_markup=ticket_dialog_keyboard(record_id),
+        )
+        return
+
+    if action == "reply":
+        await callback.answer()
+        await state.update_data(record_id=record_id)
+        await state.set_state(ModeratorReplyTicket.waiting_text)
+        await callback.message.answer(
+            f"✍️ <b>Ответ по заявке #{record_id}</b>\n\n"
+            f"Кандидат: <b>{html.escape(str(record['candidate_info']))}</b>\n\n"
+            "Введите сообщение, которое будет отправлено кандидату в Telegram через бота:",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
+    if action == "postpone":
+        storage.update_record(record_id, status="postponed")
+        record = storage.get_record(record_id)
+        tickets = storage.get_ticket_messages(record_id)
+        await callback.answer("Заявка отложена ⏳")
+        await callback.message.edit_text(
+            format_moderation_card(record),
+            parse_mode="HTML",
+            reply_markup=moderation_keyboard(record_id, len(tickets)),
+        )
+        return
 
     if action == "approve":
+        if record.get("status") == "approved":
+            await callback.answer("Эта заявка уже одобрена.", show_alert=True)
+            return
+
         storage.update_record(
             record_id,
             status="approved",
@@ -42,28 +101,198 @@ async def moderate_record(callback: CallbackQuery):
             hr_username=reviewer_username,
             approved_at=datetime.now().isoformat(),
         )
-        new_text = "\n".join(
-            [
-                "✅ Заявка одобрена",
-                "",
-                f"Кандидат: {record['candidate_info']}",
-                f"Телефон: {record['phone']}",
-                f"Юз: {record.get('username') or '—'}",
-                f"Время собеса: {record['interview_datetime']}",
-                f"Одобрил: {reviewer_username}",
-            ]
-        )
         await callback.answer("Заявка одобрена ✅")
-    else:
-        storage.update_record(record_id, status="rejected")
+
+        requester_id = record.get("requester_id")
+        if requester_id:
+            try:
+                await bot.send_message(
+                    requester_id,
+                    f"🎉 <b>Ваша заявка #{record_id} одобрена!</b>\n\n"
+                    f"Желаемое время собеседования: <b>{html.escape(str(record['interview_datetime']))}</b>\n"
+                    "С вами свяжется HR для проведения собеседования.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
         new_text = "\n".join(
             [
-                "❌ Заявка отклонена",
+                f"✅ <b>Заявка #{record_id} одобрена</b>",
                 "",
-                f"Кандидат: {record['candidate_info']}",
-                f"Отклонил: {reviewer_username}",
+                f"Кандидат: {html.escape(str(record['candidate_info']))}",
+                f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
+                f"Юз: {html.escape(str(record.get('username') or '—'))}",
+                f"Время собеса: {html.escape(str(record['interview_datetime']))}",
+                f"Одобрил: {html.escape(reviewer_username)}",
             ]
         )
-        await callback.answer("Заявка отклонена")
+        await callback.message.edit_text(new_text, parse_mode="HTML")
+        return
 
-    await callback.message.edit_text(new_text)
+    if action == "reject":
+        if record.get("status") == "rejected":
+            await callback.answer("Эта заявка уже отклонена.", show_alert=True)
+            return
+
+        storage.update_record(
+            record_id,
+            status="rejected",
+            hr_id=reviewer.id,
+            hr_username=reviewer_username,
+            rejected_at=datetime.now().isoformat(),
+        )
+        await callback.answer("Заявка отклонена ❌")
+
+        requester_id = record.get("requester_id")
+        if requester_id:
+            try:
+                await bot.send_message(
+                    requester_id,
+                    f"❌ <b>Ваша заявка #{record_id} была отклонена.</b>\n\n"
+                    "Благодарим за проявленный интерес!",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        new_text = "\n".join(
+            [
+                f"❌ <b>Заявка #{record_id} отклонена</b>",
+                "",
+                f"Кандидат: {html.escape(str(record['candidate_info']))}",
+                f"Отклонил: {html.escape(reviewer_username)}",
+            ]
+        )
+        await callback.message.edit_text(new_text, parse_mode="HTML")
+        return
+
+
+@router.message(ModeratorReplyTicket.waiting_text)
+async def mod_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Введите текстовое сообщение для отправки.", reply_markup=cancel_keyboard())
+        return
+
+    data = await state.get_data()
+    record_id = data.get("record_id")
+    record = storage.get_record(record_id)
+    if not record:
+        await state.clear()
+        await message.answer("Заявка не найдена.")
+        return
+
+    sender_name = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else f"{message.from_user.first_name}"
+    )
+
+    storage.add_ticket_message(
+        record_id=record_id,
+        sender_type="hr",
+        sender_id=message.from_user.id,
+        author_name=sender_name,
+        text=text,
+    )
+    await state.clear()
+
+    requester_id = record.get("requester_id")
+    delivery_info = ""
+    if requester_id:
+        try:
+            await bot.send_message(
+                requester_id,
+                f"📩 <b>Сообщение от HR по заявке #{record_id}:</b>\n\n"
+                f"{html.escape(text)}\n\n"
+                "<i>Чтобы ответить, нажмите кнопку ниже:</i>",
+                parse_mode="HTML",
+                reply_markup=user_ticket_keyboard(record_id),
+            )
+            delivery_info = " (доставлено кандидату в ЛС)"
+        except Exception as e:
+            delivery_info = f" (не удалось отправить в ЛС: {e})"
+    else:
+        delivery_info = " (у кандидата нет привязанного Telegram ID)"
+
+    await message.answer(
+        f"✅ <b>Ответ записан в тикет #{record_id}</b>{delivery_info}",
+        parse_mode="HTML",
+        reply_markup=ticket_dialog_keyboard(record_id),
+    )
+
+
+# ------------------------------------------------------------- ответ кандидата
+@router.callback_query(F.data.startswith("user_reply_ticket:"))
+async def user_start_ticket_reply(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    record_id = int(callback.data.split(":")[1])
+    record = storage.get_record(record_id)
+    if not record:
+        await callback.message.answer("Заявка не найдена.")
+        return
+
+    await state.update_data(record_id=record_id)
+    await state.set_state(UserReplyTicket.waiting_text)
+    await callback.message.answer(
+        f"✍️ Введите ваш ответ для HR по заявке #{record_id}:",
+        reply_markup=cancel_keyboard(),
+    )
+
+
+@router.message(UserReplyTicket.waiting_text)
+async def user_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Введите текстовое сообщение.", reply_markup=cancel_keyboard())
+        return
+
+    data = await state.get_data()
+    record_id = data.get("record_id")
+    record = storage.get_record(record_id)
+    if not record:
+        await state.clear()
+        await message.answer("Заявка не найдена.")
+        return
+
+    sender_name = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else f"{message.from_user.first_name}"
+    )
+
+    storage.add_ticket_message(
+        record_id=record_id,
+        sender_type="user",
+        sender_id=message.from_user.id,
+        author_name=sender_name,
+        text=text,
+    )
+    await state.clear()
+
+    await message.answer("✅ Ваш ответ передан HR. Ожидайте сообщения.")
+
+    # Уведомляем в канал/топик
+    settings = storage.get_settings()
+    topic_id = settings.get("target_topic_id")
+    notify_text = "\n".join(
+        [
+            f"💬 <b>Новый ответ в тикете по заявке #{record_id}</b>",
+            "",
+            f"От: {html.escape(sender_name)} (<code>{message.from_user.id}</code>)",
+            f"Кандидат: {html.escape(str(record['candidate_info']))}",
+            "",
+            f"<b>Сообщение:</b>\n{html.escape(text)}",
+        ]
+    )
+    try:
+        await bot.send_message(
+            TELEGRAM_CHANNEL_ID,
+            notify_text,
+            message_thread_id=topic_id,
+            parse_mode="HTML",
+            reply_markup=ticket_dialog_keyboard(record_id),
+        )
+    except Exception:
+        pass

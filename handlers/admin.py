@@ -8,6 +8,7 @@ from aiogram.types.input_rich_message import InputRichMessage
 
 import storage
 from filters import IsChannelAdmin
+from formatting import format_moderation_card
 from keyboards import (
     admin_panel_keyboard,
     cancel_keyboard,
@@ -28,7 +29,8 @@ def _format_users_list(users: dict) -> str:
         return "Пока никто не писал боту /start."
     lines = ["Пользователи, которые запускали бота:"]
     for uid, info in users.items():
-        lines.append(f"{info['username']} — `{uid}`")
+        uname = html.escape(str(info.get("username", "")))
+        lines.append(f"{uname} — <code>{uid}</code>")
     lines.append("\nНажмите на id, чтобы скопировать его.")
     return "\n".join(lines)
 
@@ -38,7 +40,7 @@ def _format_users_plain(users: dict) -> str:
         return "Пока никто не писал боту /start."
     lines = ["Пользователи, которые запускали бота:"]
     for uid, info in users.items():
-        lines.append(f"{info['username']} - {uid}")
+        lines.append(f"{info.get('username', '')} - {uid}")
     return "\n".join(lines)
 
 
@@ -91,13 +93,13 @@ async def assign_hr_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     users = storage.get_users()
     text = _format_users_list(users) + "\n\nОтправьте tg id пользователя, которому нужно выдать роль HR."
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=cancel_keyboard())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=cancel_keyboard())
     await state.set_state(AssignRole.waiting_for_id)
 
 
 @router.message(AssignRole.waiting_for_id)
 async def assign_hr_finish(message: Message, state: FSMContext):
-    raw = message.text.strip()
+    raw = (message.text or "").strip()
     if not raw.isdigit():
         await message.answer(
             "Некорректный tg id — нужно ввести число. Попробуйте ещё раз или отмените.",
@@ -110,8 +112,8 @@ async def assign_hr_finish(message: Message, state: FSMContext):
     storage.add_hr(user_id, username)
     await state.clear()
     await message.answer(
-        f"Пользователю `{user_id}` выдана роль HR ✅",
-        parse_mode="Markdown",
+        f"Пользователю <code>{user_id}</code> выдана роль HR ✅",
+        parse_mode="HTML",
         reply_markup=admin_panel_keyboard(),
     )
 
@@ -126,16 +128,17 @@ async def remove_hr_start(callback: CallbackQuery, state: FSMContext):
         return
     lines = ["Текущие HR:"]
     for uid in hr_roles:
-        username = users.get(uid, {}).get("username", "неизвестно")
-        lines.append(f"{username} — `{uid}`")
+        profile = storage.get_hr_profile(uid) or {}
+        username = users.get(uid, {}).get("username") or profile.get("username") or "неизвестно"
+        lines.append(f"{html.escape(str(username))} — <code>{uid}</code>")
     lines.append("\nОтправьте tg id пользователя, у которого нужно снять роль HR.")
-    await callback.message.edit_text("\n".join(lines), parse_mode="Markdown", reply_markup=cancel_keyboard())
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=cancel_keyboard())
     await state.set_state(RemoveRole.waiting_for_id)
 
 
 @router.message(RemoveRole.waiting_for_id)
 async def remove_hr_finish(message: Message, state: FSMContext):
-    raw = message.text.strip()
+    raw = (message.text or "").strip()
     if not raw.isdigit():
         await message.answer(
             "Некорректный tg id — нужно ввести число. Попробуйте ещё раз или отмените.",
@@ -146,8 +149,8 @@ async def remove_hr_finish(message: Message, state: FSMContext):
     storage.remove_hr(user_id)
     await state.clear()
     await message.answer(
-        f"У пользователя `{user_id}` снята роль HR ✅",
-        parse_mode="Markdown",
+        f"У пользователя <code>{user_id}</code> снята роль HR ✅",
+        parse_mode="HTML",
         reply_markup=admin_panel_keyboard(),
     )
 
@@ -162,10 +165,11 @@ async def list_hr(callback: CallbackQuery):
     else:
         lines = ["Текущие HR:"]
         for uid in hr_roles:
-            username = users.get(uid, {}).get("username", "неизвестно")
-            lines.append(f"{username} — `{uid}`")
+            profile = storage.get_hr_profile(uid) or {}
+            username = users.get(uid, {}).get("username") or profile.get("username") or "неизвестно"
+            lines.append(f"{html.escape(str(username))} — <code>{uid}</code>")
         text = "\n".join(lines)
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=admin_panel_keyboard())
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=admin_panel_keyboard())
 
 
 # -------------------------------------------------------------- hr table --
@@ -250,21 +254,16 @@ async def admin_pending_view(callback: CallbackQuery):
     await callback.answer()
     _, raw_id, raw_page = callback.data.split(":")
     record = storage.get_record(int(raw_id))
-    if not record or record.get("status") != "pending":
+    if not record or record.get("status") not in ("pending", "postponed"):
         await callback.message.edit_text("Заявка не найдена или уже обработана.", reply_markup=admin_panel_keyboard())
         return
-    text = "\n".join(
-        [
-            f"Заявка #{record['id']}",
-            "",
-            f"От: {record.get('requester_username', '—')}",
-            f"Кандидат: {record['candidate_info']}",
-            f"Телефон: {record['phone']}",
-            f"Юз: {record.get('username') or '—'}",
-            f"Желаемое время собеса: {record.get('interview_datetime', '—')}",
-        ]
+    tickets = storage.get_ticket_messages(record["id"])
+    text = format_moderation_card(record)
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=moderation_keyboard(record["id"], len(tickets)),
     )
-    await callback.message.edit_text(text, reply_markup=moderation_keyboard(record["id"]))
 
 
 # ------------------------------------------------------------------- план --

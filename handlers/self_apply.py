@@ -1,3 +1,4 @@
+import html
 import re
 from datetime import datetime
 
@@ -8,7 +9,8 @@ from aiogram.types import CallbackQuery, Message
 import storage
 from config import TELEGRAM_CHANNEL_ID
 from filters import IsChannelAdmin
-from keyboards import cancel_keyboard, main_menu_keyboard, moderation_keyboard
+from formatting import format_moderation_card
+from keyboards import cancel_keyboard, main_menu_keyboard, moderation_keyboard, skip_or_cancel_keyboard
 from states import SelfApply
 
 router = Router()
@@ -53,10 +55,21 @@ async def sa_phone(message: Message, state: FSMContext):
         return
     await state.update_data(phone=text)
     await message.answer(
-        'Ваш юзернейм в Telegram? (например: @username; если юзернейма нет — отправьте "-")',
-        reply_markup=cancel_keyboard(),
+        'Ваш юзернейм в Telegram? (например: @username; если юзернейма нет — нажмите «Пропустить пункт» или отправьте "-")',
+        reply_markup=skip_or_cancel_keyboard("sa_skip_username"),
     )
     await state.set_state(SelfApply.username)
+
+
+@router.callback_query(F.data == "sa_skip_username", SelfApply.username)
+async def sa_skip_username(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.update_data(username=None)
+    await callback.message.edit_text(
+        "Когда вам удобно на собеседование? (примерно, в формате ДД.ММ.ГГГГ ЧЧ:ММ, например 25.05.2026 14:00)",
+        reply_markup=cancel_keyboard(),
+    )
+    await state.set_state(SelfApply.interview_datetime)
 
 
 @router.message(SelfApply.username)
@@ -64,8 +77,8 @@ async def sa_username(message: Message, state: FSMContext):
     text = (message.text or "").strip()
     if not USERNAME_RE.match(text):
         await message.answer(
-            'Введите юзернейм в формате @username, либо "-", если его нет.',
-            reply_markup=cancel_keyboard(),
+            'Введите юзернейм в формате @username, нажмите кнопку «Пропустить пункт», либо отправьте "-".',
+            reply_markup=skip_or_cancel_keyboard("sa_skip_username"),
         )
         return
     await state.update_data(username=None if text == "-" else text)
@@ -120,23 +133,13 @@ async def sa_interview_datetime(message: Message, state: FSMContext):
 
     settings = storage.get_settings()
     topic_id = settings.get("target_topic_id")
-    card = "\n".join(
-        [
-            "🆕 Заявка на модерацию (самозапись)",
-            "",
-            f"От: {record['requester_username']} (`{record['requester_id']}`)",
-            f"Кандидат: {record['candidate_info']}",
-            f"Телефон: {record['phone']}",
-            f"Юз: {record.get('username') or '—'}",
-            f"Желаемое время собеса: {record['interview_datetime']}",
-        ]
-    )
+    card = format_moderation_card(record)
     try:
         sent = await message.bot.send_message(
             TELEGRAM_CHANNEL_ID,
             card,
             message_thread_id=topic_id,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=moderation_keyboard(record["id"]),
         )
         storage.update_record(record["id"], channel_chat_id=sent.chat.id, channel_message_id=sent.message_id)

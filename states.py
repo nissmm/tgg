@@ -29,3 +29,11 @@ class EditRecord(StatesGroup):
 
 class SetPlan(StatesGroup):
     waiting_value = State()
+
+
+class ModeratorReplyTicket(StatesGroup):
+    waiting_text = State()
+
+
+class UserReplyTicket(StatesGroup):
+    waiting_text = State()

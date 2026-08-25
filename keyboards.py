@@ -120,9 +120,39 @@ def edit_fields_keyboard(record_id: int, list_prefix: str, page: int) -> InlineK
     return b.as_markup()
 
 
-def moderation_keyboard(record_id: int) -> InlineKeyboardMarkup:
+def skip_or_cancel_keyboard(skip_data: str = "skip_username") -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⏭️ Пропустить пункт", callback_data=skip_data)
+    b.button(text="❌ Отмена", callback_data="cancel_fsm")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def moderation_keyboard(record_id: int, ticket_count: int = 0) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Одобрить", callback_data=f"modrec:approve:{record_id}")
     b.button(text="❌ Отклонить", callback_data=f"modrec:reject:{record_id}")
-    b.adjust(2)
+    b.button(text="⏳ Отложить", callback_data=f"modrec:postpone:{record_id}")
+    b.button(text="💬 Ответить на заявку", callback_data=f"modrec:reply:{record_id}")
+    ticket_label = f"📜 Тикет ({ticket_count})" if ticket_count > 0 else "📜 Тикет"
+    b.button(text=ticket_label, callback_data=f"modrec:ticket:{record_id}")
+    b.adjust(2, 2, 1)
+    return b.as_markup()
+
+
+def ticket_dialog_keyboard(record_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="💬 Написать сообщение", callback_data=f"modrec:reply:{record_id}")
+    b.button(text="✅ Одобрить", callback_data=f"modrec:approve:{record_id}")
+    b.button(text="❌ Отклонить", callback_data=f"modrec:reject:{record_id}")
+    b.button(text="⏳ Отложить", callback_data=f"modrec:postpone:{record_id}")
+    b.button(text="⬅️ К заявке", callback_data=f"modrec:view:{record_id}")
+    b.adjust(1, 2, 2)
+    return b.as_markup()
+
+
+def user_ticket_keyboard(record_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="💬 Ответить HR", callback_data=f"user_reply_ticket:{record_id}")
+    b.adjust(1)
     return b.as_markup()
