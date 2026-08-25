@@ -12,7 +12,8 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 USERS_FILE = DATA_DIR / "users.pkl"
-HR_ROLES_FILE = DATA_DIR / "hr_roles.pkl"
+HR_PROFILES_FILE = DATA_DIR / "hr_profiles.pkl"
+LEGACY_HR_ROLES_FILE = DATA_DIR / "hr_roles.pkl"  # формат до апдейта с профилями
 HR_RECORDS_FILE = DATA_DIR / "hr_records.pkl"
 SETTINGS_FILE = DATA_DIR / "settings.pkl"
 TOPICS_FILE = DATA_DIR / "topics.pkl"
@@ -48,50 +49,153 @@ def register_user(user_id: int, username: Optional[str]) -> None:
     _save(USERS_FILE, users)
 
 
-# ------------------------------------------------------------- hr roles ----
+# ------------------------------------------------------------ hr profiles --
+def get_hr_profiles() -> dict:
+    """user_id -> {username, joined_at, shift_start, total_worked_seconds}."""
+    profiles = _load(HR_PROFILES_FILE, None)
+    if profiles is not None:
+        return profiles
+
+    # миграция со старого формата (просто множество id без метаданных)
+    legacy = _load(LEGACY_HR_ROLES_FILE, None)
+    profiles = {}
+    if legacy:
+        now = datetime.now().isoformat()
+        for uid in legacy:
+            profiles[uid] = {
+                "username": "",
+                "joined_at": now,
+                "shift_start": None,
+                "total_worked_seconds": 0.0,
+            }
+    _save(HR_PROFILES_FILE, profiles)
+    return profiles
+
+
 def get_hr_roles() -> set:
-    return _load(HR_ROLES_FILE, set())
-
-
-def add_hr(user_id: int) -> None:
-    roles = get_hr_roles()
-    roles.add(user_id)
-    _save(HR_ROLES_FILE, roles)
-
-
-def remove_hr(user_id: int) -> None:
-    roles = get_hr_roles()
-    roles.discard(user_id)
-    _save(HR_ROLES_FILE, roles)
+    return set(get_hr_profiles().keys())
 
 
 def is_hr(user_id: int) -> bool:
-    return user_id in get_hr_roles()
+    return user_id in get_hr_profiles()
 
 
-# ----------------------------------------------------------- hr records ----
+def get_hr_profile(user_id: int) -> Optional[dict]:
+    return get_hr_profiles().get(user_id)
+
+
+def add_hr(user_id: int, username: Optional[str] = None) -> None:
+    profiles = get_hr_profiles()
+    if user_id not in profiles:
+        profiles[user_id] = {
+            "username": username or "",
+            "joined_at": datetime.now().isoformat(),
+            "shift_start": None,
+            "total_worked_seconds": 0.0,
+        }
+    elif username:
+        profiles[user_id]["username"] = username
+    _save(HR_PROFILES_FILE, profiles)
+
+
+def remove_hr(user_id: int) -> None:
+    profiles = get_hr_profiles()
+    profiles.pop(user_id, None)
+    _save(HR_PROFILES_FILE, profiles)
+
+
+def is_shift_active(user_id: int) -> bool:
+    profile = get_hr_profiles().get(user_id)
+    return bool(profile and profile.get("shift_start"))
+
+
+def start_shift(user_id: int) -> None:
+    profiles = get_hr_profiles()
+    if user_id in profiles:
+        profiles[user_id]["shift_start"] = datetime.now().isoformat()
+        _save(HR_PROFILES_FILE, profiles)
+
+
+def end_shift(user_id: int):
+    """Завершает смену. Возвращает (duration_seconds, shift_start_iso) либо None,
+    если смена не была начата."""
+    profiles = get_hr_profiles()
+    profile = profiles.get(user_id)
+    if not profile or not profile.get("shift_start"):
+        return None
+
+    shift_start_iso = profile["shift_start"]
+    started = datetime.fromisoformat(shift_start_iso)
+    duration = (datetime.now() - started).total_seconds()
+    profile["total_worked_seconds"] = profile.get("total_worked_seconds", 0.0) + duration
+    profile["shift_start"] = None
+    _save(HR_PROFILES_FILE, profiles)
+    return duration, shift_start_iso
+
+
+# ------------------------------------------------------------- hr records --
 def get_hr_records() -> list:
     return _load(HR_RECORDS_FILE, [])
+
+
+def _save_records(records: list) -> None:
+    _save(HR_RECORDS_FILE, records)
 
 
 def add_hr_record(record: dict) -> dict:
     records = get_hr_records()
     record = dict(record)
     record["id"] = (records[-1]["id"] + 1) if records else 1
-    record["created_at"] = datetime.now().isoformat()
+    record.setdefault("created_at", datetime.now().isoformat())
+    record.setdefault("status", "approved")
     records.append(record)
-    _save(HR_RECORDS_FILE, records)
+    _save_records(records)
     return record
+
+
+def get_record(record_id: int) -> Optional[dict]:
+    for r in get_hr_records():
+        if r["id"] == record_id:
+            return r
+    return None
+
+
+def update_record(record_id: int, **fields) -> Optional[dict]:
+    records = get_hr_records()
+    for r in records:
+        if r["id"] == record_id:
+            r.update(fields)
+            _save_records(records)
+            return r
+    return None
+
+
+def get_pending_records() -> list:
+    return [r for r in get_hr_records() if r.get("status") == "pending"]
+
+
+def get_records_by_hr(hr_id: int, status: str = "approved") -> list:
+    return [r for r in get_hr_records() if r.get("hr_id") == hr_id and r.get("status") == status]
 
 
 # -------------------------------------------------------------- settings --
 def get_settings() -> dict:
-    return _load(SETTINGS_FILE, {"target_topic_id": None})
+    return _load(SETTINGS_FILE, {"target_topic_id": None, "daily_plan": 10})
 
 
 def set_target_topic(topic_id: Optional[int]) -> None:
     settings = get_settings()
     settings["target_topic_id"] = topic_id
+    _save(SETTINGS_FILE, settings)
+
+
+def get_daily_plan() -> int:
+    return get_settings().get("daily_plan", 10)
+
+
+def set_daily_plan(value: int) -> None:
+    settings = get_settings()
+    settings["daily_plan"] = value
     _save(SETTINGS_FILE, settings)
 
 

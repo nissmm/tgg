@@ -10,8 +10,22 @@ class RemoveRole(StatesGroup):
 
 
 class NewHRRecord(StatesGroup):
-    recorded_by = State()
     candidate_info = State()
     phone = State()
     username = State()
-    interview_date = State()
+    interview_datetime = State()
+
+
+class SelfApply(StatesGroup):
+    candidate_info = State()
+    phone = State()
+    username = State()
+    interview_datetime = State()
+
+
+class EditRecord(StatesGroup):
+    waiting_value = State()
+
+
+class SetPlan(StatesGroup):
+    waiting_value = State()
