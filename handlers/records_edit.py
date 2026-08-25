@@ -8,7 +8,14 @@ from aiogram.types import CallbackQuery, Message
 import storage
 from filters import IsChannelAdmin
 from formatting import format_record_card
-from keyboards import admin_panel_keyboard, cancel_keyboard, edit_fields_keyboard, hr_panel_keyboard, records_list_keyboard
+from keyboards import (
+    admin_panel_keyboard,
+    cancel_keyboard,
+    confirm_delete_record_keyboard,
+    edit_fields_keyboard,
+    hr_panel_keyboard,
+    records_list_keyboard,
+)
 from states import EditRecord
 
 router = Router()
@@ -191,3 +198,94 @@ async def save_edit_field(message: Message, state: FSMContext):
         else hr_panel_keyboard(storage.is_shift_active(message.from_user.id))
     )
     await message.answer("Запись обновлена ✅", reply_markup=keyboard)
+
+
+# ----------------------------------------------------------------- удаление
+@router.callback_query(F.data.startswith("delrec_ask:"))
+async def delrec_ask(callback: CallbackQuery):
+    _, raw_id, list_prefix, raw_page = callback.data.split(":")
+    record_id = int(raw_id)
+    record = storage.get_record(record_id)
+    if not record:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+
+    is_admin = await IsChannelAdmin()(callback, callback.bot)
+    if not is_admin and record.get("hr_id") != callback.from_user.id:
+        await callback.answer("Вы можете удалять только свои записи.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"⚠️ <b>Вы уверены, что хотите удалить запись #{record_id}?</b>\n\n"
+        f"Кандидат: <b>{record['candidate_info']}</b>\n"
+        f"Телефон: <code>{record['phone']}</code>\n\n"
+        "Это действие нельзя будет отменить.",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_record_keyboard(record_id, list_prefix, int(raw_page)),
+    )
+
+
+@router.callback_query(F.data.startswith("delrec_cancel:"))
+async def delrec_cancel(callback: CallbackQuery):
+    _, raw_id, list_prefix, raw_page = callback.data.split(":")
+    record_id = int(raw_id)
+    record = storage.get_record(record_id)
+    if not record:
+        await callback.answer("Запись не найдена.", show_alert=True)
+        return
+
+    await callback.answer("Удаление отменено.")
+    await callback.message.edit_text(
+        format_record_card(record),
+        parse_mode="HTML",
+        reply_markup=edit_fields_keyboard(record["id"], list_prefix, int(raw_page)),
+    )
+
+
+@router.callback_query(F.data.startswith("delrec_confirm:"))
+async def delrec_confirm(callback: CallbackQuery):
+    _, raw_id, list_prefix, raw_page = callback.data.split(":")
+    record_id = int(raw_id)
+    record = storage.get_record(record_id)
+    if not record:
+        await callback.answer("Запись уже была удалена.", show_alert=True)
+        return
+
+    is_admin = await IsChannelAdmin()(callback, callback.bot)
+    if not is_admin and record.get("hr_id") != callback.from_user.id:
+        await callback.answer("У вас нет прав на удаление этой записи.", show_alert=True)
+        return
+
+    storage.delete_record(record_id)
+    await callback.answer("Запись успешно удалена 🗑️", show_alert=True)
+
+    page = int(raw_page)
+    if list_prefix == "hr_my_records":
+        records = sorted(
+            storage.get_records_by_hr(callback.from_user.id, status="approved"),
+            key=lambda r: r["created_at"],
+            reverse=True,
+        )
+        if not records:
+            await callback.message.edit_text(
+                "У вас больше нет записей.",
+                reply_markup=hr_panel_keyboard(storage.is_shift_active(callback.from_user.id)),
+            )
+            return
+        actual_page = min(page, (len(records) - 1) // 5)
+        await callback.message.edit_text(
+            f"Ваши записи ({len(records)}):",
+            reply_markup=records_list_keyboard(records, actual_page, "hr_my_records", "hr_edit_open", "hr_panel"),
+        )
+    else:
+        records = sorted(storage.get_hr_records(), key=lambda r: r["created_at"], reverse=True)
+        if not records:
+            await callback.message.edit_text("Записей пока нет.", reply_markup=admin_panel_keyboard())
+            return
+        actual_page = min(page, (len(records) - 1) // 5)
+        await callback.message.edit_text(
+            f"Все записи ({len(records)}):",
+            reply_markup=records_list_keyboard(records, actual_page, "admin_all_records", "admin_edit_open", "admin_panel"),
+        )
+

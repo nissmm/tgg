@@ -83,6 +83,14 @@ def self_apply_table_filters_keyboard() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+STATUS_EMOJIS = {
+    "pending": "🆕",
+    "postponed": "⏳",
+    "approved": "✅",
+    "rejected": "❌",
+}
+
+
 def records_list_keyboard(
     records: list,
     page: int,
@@ -96,7 +104,8 @@ def records_list_keyboard(
     chunk = records[start : start + page_size]
 
     for r in chunk:
-        label = f"#{r['id']} {r['candidate_info'][:22]}"
+        emoji = STATUS_EMOJIS.get(r.get("status", "approved"), "📄")
+        label = f"{emoji} #{r['id']} {r['candidate_info'][:18]}"
         b.button(text=label, callback_data=f"{open_prefix}:{r['id']}:{page}")
 
     layout = [1] * len(chunk)
@@ -128,7 +137,16 @@ def edit_fields_keyboard(record_id: int, list_prefix: str, page: int) -> InlineK
     ]
     for key, label in fields:
         b.button(text=f"✏️ {label}", callback_data=f"editrec:{record_id}:{key}")
+    b.button(text="🗑️ Удалить запись", callback_data=f"delrec_ask:{record_id}:{list_prefix}:{page}")
     b.button(text="⬅️ Назад", callback_data=f"{list_prefix}:{page}")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def confirm_delete_record_keyboard(record_id: int, list_prefix: str, page: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🗑️ Да, удалить запись", callback_data=f"delrec_confirm:{record_id}:{list_prefix}:{page}")
+    b.button(text="❌ Отмена", callback_data=f"delrec_cancel:{record_id}:{list_prefix}:{page}")
     b.adjust(1)
     return b.as_markup()
 

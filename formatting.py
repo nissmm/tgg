@@ -260,16 +260,44 @@ def build_self_apply_table_html(records: list) -> str:
     return "<table bordered striped>" + header_row + "".join(body_rows) + "</table>"
 
 
+STATUS_LABELS = {
+    "pending": "🆕 На модерации",
+    "postponed": "⏳ Отложена",
+    "approved": "✅ Одобрена",
+    "rejected": "❌ Отклонена",
+}
+
+STATUS_EMOJIS = {
+    "pending": "🆕",
+    "postponed": "⏳",
+    "approved": "✅",
+    "rejected": "❌",
+}
+
+
+def get_status_label(status: Optional[str]) -> str:
+    if not status:
+        return "✅ Одобрена"
+    return STATUS_LABELS.get(status, status)
+
+
+def get_status_emoji(status: Optional[str]) -> str:
+    if not status:
+        return "✅"
+    return STATUS_EMOJIS.get(status, "📄")
+
+
 def format_record_card(record: dict) -> str:
+    status_text = get_status_label(record.get("status", "approved"))
     return "\n".join(
         [
-            f"<b>Запись #{record['id']}</b>",
+            f"<b>Запись #{record['id']}</b> ({status_text})",
             "",
             f"Кого и сколько лет: {html.escape(str(record['candidate_info']))}",
             f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
             f"Юз: {html.escape(str(record.get('username') or '—'))}",
             f"Дата и время собеса: {html.escape(str(record.get('interview_datetime', record.get('interview_date', '—'))))}",
             f"Записал: {html.escape(str(record.get('hr_username') or record.get('recorded_by') or '—'))}",
-            f"Статус: {html.escape(str(record.get('status', 'approved')))}",
+            f"Статус: {status_text}",
         ]
     )

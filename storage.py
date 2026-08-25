@@ -196,6 +196,15 @@ def update_record(record_id: int, **fields) -> Optional[dict]:
     return None
 
 
+def delete_record(record_id: int) -> bool:
+    records = get_hr_records()
+    new_records = [r for r in records if r["id"] != record_id]
+    if len(new_records) != len(records):
+        _save_records(new_records)
+        return True
+    return False
+
+
 def get_self_apply_records() -> list:
     """Возвращает все заявки, созданные через самозапись."""
     return [
