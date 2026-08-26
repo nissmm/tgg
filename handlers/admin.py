@@ -63,19 +63,19 @@ async def list_users(callback: CallbackQuery):
 async def select_topic(callback: CallbackQuery):
     await callback.answer()
     topics = storage.get_topics()
-    if not topics:
-        await callback.message.edit_text(
-            "Пока не обнаружено ни одного топика.\n\n"
-            "Telegram Bot API не даёт боту способа заранее получить список "
-            "топиков форума — бот запоминает топик, как только в нём "
-            "появляется хотя бы одно сообщение. Напишите любое сообщение в "
-            "нужном топике целевой группы, затем откройте этот пункт снова.",
-            reply_markup=admin_panel_keyboard(),
-        )
-        return
+    current_topic_id = storage.get_settings().get("target_topic_id")
+    current_name = topics.get(
+        current_topic_id,
+        "Основной чат (без топика)" if current_topic_id is None else f"Топик #{current_topic_id}",
+    )
+
     await callback.message.edit_text(
+        f"📌 <b>Выбор топика для уведомлений</b>\n\n"
+        f"Текущий выбранный топик: <b>🔘 {html.escape(str(current_name))}</b>\n\n"
+        "<i>Этот параметр глобальный — выбор действует для всех HR и админов.</i>\n\n"
         "Выберите топик, в который бот будет отправлять уведомления:",
-        reply_markup=topics_keyboard(topics),
+        parse_mode="HTML",
+        reply_markup=topics_keyboard(topics, current_topic_id),
     )
 
 
@@ -84,8 +84,20 @@ async def set_topic(callback: CallbackQuery):
     raw = callback.data.split(":", 1)[1]
     topic_id = None if raw == "none" else int(raw)
     storage.set_target_topic(topic_id)
-    await callback.answer("Топик установлен ✅", show_alert=True)
-    await callback.message.edit_text("⚙️ Админ-панель", reply_markup=admin_panel_keyboard())
+    topics = storage.get_topics()
+    topic_name = topics.get(
+        topic_id,
+        "Основной чат (без топика)" if topic_id is None else f"Топик #{topic_id}",
+    )
+    await callback.answer(f"Выбран топик: {topic_name} ✅", show_alert=True)
+    await callback.message.edit_text(
+        f"📌 <b>Выбор топика для уведомлений</b>\n\n"
+        f"Текущий выбранный топик: <b>🔘 {html.escape(str(topic_name))}</b>\n\n"
+        "<i>Параметр сохранён глобально для всех пользователей.</i>\n\n"
+        "Выберите топик из списка:",
+        parse_mode="HTML",
+        reply_markup=topics_keyboard(topics, topic_id),
+    )
 
 
 # ------------------------------------------------------------- hr roles ---
@@ -295,7 +307,7 @@ async def admin_pending_view(callback: CallbackQuery):
     await callback.message.edit_text(
         text,
         parse_mode="HTML",
-        reply_markup=moderation_keyboard(record["id"], len(tickets)),
+        reply_markup=moderation_keyboard(record["id"], len(tickets), back_data=f"admin_pending_list:{raw_page}"),
     )
 
 

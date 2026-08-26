@@ -207,7 +207,7 @@ async def hr_pending_view(callback: CallbackQuery):
     await callback.message.edit_text(
         text,
         parse_mode="HTML",
-        reply_markup=moderation_keyboard(record["id"], len(tickets)),
+        reply_markup=moderation_keyboard(record["id"], len(tickets), back_data=f"hr_pending_list:{raw_page}"),
     )
 
 

@@ -275,6 +275,14 @@ STATUS_EMOJIS = {
 }
 
 
+def is_self_apply_record(record: dict) -> bool:
+    return bool(
+        record.get("is_self_apply")
+        or record.get("requester_id") is not None
+        or record.get("hr_username") == "Самозапись"
+    )
+
+
 def get_status_label(status: Optional[str]) -> str:
     if not status:
         return "✅ Одобрена"
@@ -289,15 +297,20 @@ def get_status_emoji(status: Optional[str]) -> str:
 
 def format_record_card(record: dict) -> str:
     status_text = get_status_label(record.get("status", "approved"))
+    is_self = is_self_apply_record(record)
+    origin_text = "👤 Самозапись кандидата" if is_self else "💼 Запись через HR"
+    recorded_by = record.get("hr_username") or record.get("recorded_by") or ("Самозапись" if is_self else "—")
+    
     return "\n".join(
         [
             f"<b>Запись #{record['id']}</b> ({status_text})",
             "",
+            f"Тип: <b>{origin_text}</b>",
             f"Кого и сколько лет: {html.escape(str(record['candidate_info']))}",
             f"Телефон: <code>{html.escape(str(record['phone']))}</code>",
             f"Юз: {html.escape(str(record.get('username') or '—'))}",
             f"Дата и время собеса: {html.escape(str(record.get('interview_datetime', record.get('interview_date', '—'))))}",
-            f"Записал: {html.escape(str(record.get('hr_username') or record.get('recorded_by') or '—'))}",
+            f"Записал: {html.escape(str(recorded_by))}",
             f"Статус: {status_text}",
         ]
     )

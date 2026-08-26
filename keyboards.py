@@ -45,11 +45,22 @@ def hr_panel_keyboard(shift_active: bool = False) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def topics_keyboard(topics: dict) -> InlineKeyboardMarkup:
+def topics_keyboard(topics: dict, current_topic_id: object = "UNSET") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    for topic_id, name in topics.items():
+    
+    # Всегда показываем опцию "Основной чат (без топика)"
+    all_topics = dict(topics)
+    if None not in all_topics:
+        all_topics[None] = "Основной чат (без топика)"
+
+    for topic_id, name in all_topics.items():
         payload = "none" if topic_id is None else str(topic_id)
-        b.button(text=name, callback_data=f"set_topic:{payload}")
+        if current_topic_id != "UNSET":
+            is_selected = (topic_id == current_topic_id) or (topic_id is None and current_topic_id is None)
+            prefix = "🔘 " if is_selected else "⚪ "
+        else:
+            prefix = ""
+        b.button(text=f"{prefix}{name}", callback_data=f"set_topic:{payload}")
     b.button(text="⬅️ Назад", callback_data="admin_panel")
     b.adjust(1)
     return b.as_markup()
@@ -104,8 +115,14 @@ def records_list_keyboard(
     chunk = records[start : start + page_size]
 
     for r in chunk:
-        emoji = STATUS_EMOJIS.get(r.get("status", "approved"), "📄")
-        label = f"{emoji} #{r['id']} {r['candidate_info'][:18]}"
+        st_emoji = STATUS_EMOJIS.get(r.get("status", "approved"), "✅")
+        is_self = bool(
+            r.get("is_self_apply")
+            or r.get("requester_id") is not None
+            or r.get("hr_username") == "Самозапись"
+        )
+        orig_emoji = "👤" if is_self else "💼"
+        label = f"{st_emoji}{orig_emoji} #{r['id']} {r['candidate_info'][:16]}"
         b.button(text=label, callback_data=f"{open_prefix}:{r['id']}:{page}")
 
     layout = [1] * len(chunk)
@@ -159,7 +176,7 @@ def skip_or_cancel_keyboard(skip_data: str = "skip_username") -> InlineKeyboardM
     return b.as_markup()
 
 
-def moderation_keyboard(record_id: int, ticket_count: int = 0) -> InlineKeyboardMarkup:
+def moderation_keyboard(record_id: int, ticket_count: int = 0, back_data: str = "modrec_back") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Одобрить", callback_data=f"modrec:approve:{record_id}")
     b.button(text="❌ Отклонить", callback_data=f"modrec:reject:{record_id}")
@@ -167,7 +184,8 @@ def moderation_keyboard(record_id: int, ticket_count: int = 0) -> InlineKeyboard
     b.button(text="💬 Ответить на заявку", callback_data=f"modrec:reply:{record_id}")
     ticket_label = f"📜 Тикет ({ticket_count})" if ticket_count > 0 else "📜 Тикет"
     b.button(text=ticket_label, callback_data=f"modrec:ticket:{record_id}")
-    b.adjust(2, 2, 1)
+    b.button(text="⬅️ Назад", callback_data=back_data)
+    b.adjust(2, 2, 1, 1)
     return b.as_markup()
 
 

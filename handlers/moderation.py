@@ -10,8 +10,12 @@ from config import TELEGRAM_CHANNEL_ID
 from filters import IsChannelAdmin
 from formatting import format_moderation_card, format_ticket_history
 from keyboards import (
+    admin_panel_keyboard,
     cancel_keyboard,
+    hr_panel_keyboard,
+    main_menu_keyboard,
     moderation_keyboard,
+    records_list_keyboard,
     ticket_dialog_keyboard,
     user_ticket_keyboard,
 )
@@ -373,3 +377,30 @@ async def user_send_ticket_reply(message: Message, state: FSMContext, bot: Bot):
         )
     except Exception:
         pass
+
+
+@router.callback_query(F.data == "modrec_back")
+async def modrec_back(callback: CallbackQuery):
+    await callback.answer()
+    is_admin = await IsChannelAdmin()(callback, callback.bot)
+    if is_admin:
+        pending = sorted(storage.get_pending_records(), key=lambda r: r["created_at"])
+        if pending:
+            await callback.message.edit_text(
+                f"Заявки на модерации ({len(pending)}):",
+                reply_markup=records_list_keyboard(pending, 0, "admin_pending_list", "admin_pending_view", "admin_panel"),
+            )
+        else:
+            await callback.message.edit_text("⚙️ Админ-панель", reply_markup=admin_panel_keyboard())
+    elif storage.is_hr(callback.from_user.id):
+        pending = sorted(storage.get_pending_records(), key=lambda r: r["created_at"])
+        shift_active = storage.is_shift_active(callback.from_user.id)
+        if pending:
+            await callback.message.edit_text(
+                f"Заявки на модерации ({len(pending)}):",
+                reply_markup=records_list_keyboard(pending, 0, "hr_pending_list", "hr_pending_view", "hr_panel"),
+            )
+        else:
+            await callback.message.edit_text("📋 HR-функции", reply_markup=hr_panel_keyboard(shift_active))
+    else:
+        await callback.message.edit_text("Главное меню", reply_markup=main_menu_keyboard(False, False))
