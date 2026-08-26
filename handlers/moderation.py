@@ -8,7 +8,13 @@ from aiogram.types import CallbackQuery, Message
 import storage
 from config import TELEGRAM_CHANNEL_ID
 from filters import IsChannelAdmin
-from formatting import format_moderation_card, format_ticket_history
+from formatting import (
+    format_channel_approved_notification,
+    format_channel_postponed_notification,
+    format_channel_rejected_notification,
+    format_moderation_card,
+    format_ticket_history,
+)
 from keyboards import (
     admin_panel_keyboard,
     cancel_keyboard,
@@ -104,9 +110,7 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
         try:
             await bot.send_message(
                 TELEGRAM_CHANNEL_ID,
-                f"⏳ <b>Заявка #{record_id} отложена на рассмотрение</b>\n"
-                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
-                f"Обработал: {html.escape(reviewer_username)}",
+                format_channel_postponed_notification(record, reviewer_username),
                 message_thread_id=topic_id,
                 parse_mode="HTML",
             )
@@ -158,12 +162,7 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
         try:
             await bot.send_message(
                 TELEGRAM_CHANNEL_ID,
-                f"✅ <b>Заявка #{record_id} одобрена</b>\n"
-                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
-                f"Телефон: <code>{html.escape(str(record['phone']))}</code>\n"
-                f"Юз: {html.escape(str(record.get('username') or '—'))}\n"
-                f"Время собеса: {html.escape(str(record['interview_datetime']))}\n"
-                f"Одобрил(а): {html.escape(reviewer_username)}",
+                format_channel_approved_notification(record, reviewer_username),
                 message_thread_id=topic_id,
                 parse_mode="HTML",
             )
@@ -214,9 +213,7 @@ async def moderate_record(callback: CallbackQuery, state: FSMContext, bot: Bot):
         try:
             await bot.send_message(
                 TELEGRAM_CHANNEL_ID,
-                f"❌ <b>Заявка #{record_id} отклонена</b>\n"
-                f"Кандидат: {html.escape(str(record['candidate_info']))}\n"
-                f"Отклонил(а): {html.escape(reviewer_username)}",
+                format_channel_rejected_notification(record, reviewer_username),
                 message_thread_id=topic_id,
                 parse_mode="HTML",
             )
