@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 import storage
 from config import TELEGRAM_CHANNEL_ID
 from filters import IsChannelAdmin
-from formatting import format_moderation_card
+from formatting import format_channel_self_apply_notification, format_moderation_card
 from keyboards import cancel_keyboard, main_menu_keyboard, moderation_keyboard, skip_or_cancel_keyboard
 from states import SelfApply
 
